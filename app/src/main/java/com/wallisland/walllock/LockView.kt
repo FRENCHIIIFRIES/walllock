@@ -3,20 +3,18 @@ package com.wallisland.walllock
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.LinearGradient
+import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
-import android.graphics.Typeface
-import android.os.Build
 import android.os.SystemClock
 import android.text.TextPaint
 import android.text.TextUtils
 import android.text.format.DateFormat
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
@@ -29,14 +27,15 @@ import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
- * The whole lock screen player, drawn by hand so the cover can grow smoothly.
+ * The whole lock screen player, drawn by hand in the Nothing style so the cover can grow smoothly.
  *
- * Small: a frosted card near the bottom with a thumbnail, over a blurred copy of the cover.
- * Big (tap the cover): the cover springs up to fill the top of the screen under the clock and melts
- * into its own colour below, like the iPhone's full-screen artwork. Tap it again to shrink it.
+ * Small: a black card near the bottom with a thumbnail, over a dot grid where every dot is sized by
+ * the album cover, so the cover shows through as a faint halftone. Big (tap the cover): the cover
+ * springs up to fill the top of the screen under the dot-matrix clock and fades into black below.
+ * Tap it again to shrink it.
  */
 @SuppressLint("ViewConstructor")
-class LockView(ctx: Context, startExpanded: Boolean) : View(ctx) {
+class LockView(ctx: Context, startExpanded: Boolean, private val dotCover: Boolean) : View(ctx) {
 
     var onExpandedChanged: ((Boolean) -> Unit)? = null
     var onUnlock: (() -> Unit)? = null
@@ -47,8 +46,10 @@ class LockView(ctx: Context, startExpanded: Boolean) : View(ctx) {
 
     private var track: NowPlaying.Track? = null
     private var artKey: String? = null
-    private var blur: Bitmap? = null
-    private var edge = 0xFF202020.toInt()
+    private var wall: Bitmap? = null
+    private var dots: DotArt? = null
+    private var coverPaint: Paint? = null
+    private var coverSize = 0f
 
     // ---- Expansion spring: p is 0 (small card) to 1 (big cover), and may overshoot a little. -------
     private var expanded = startExpanded
@@ -63,8 +64,9 @@ class LockView(ctx: Context, startExpanded: Boolean) : View(ctx) {
             val dt = ((now - lastFrame) / 1000f).coerceIn(0.001f, 0.032f)
             lastFrame = now
             val target = if (expanded) 1f else 0f
-            val k = 260f
-            val c = 2f * sqrt(k) * 0.72f
+            // Just a touch of bounce, like iOS.
+            val k = 300f
+            val c = 2f * sqrt(k) * 0.82f
             pv += (-k * (p - target) - c * pv) * dt
             p += pv * dt
             if (abs(p - target) < 0.001f && abs(pv) < 0.01f) {
@@ -78,7 +80,7 @@ class LockView(ctx: Context, startExpanded: Boolean) : View(ctx) {
         }
     }
 
-    // ---- Once a second for the clock and progress. ------------------------------------------------
+    // ---- Twice a second for the clock and progress. -----------------------------------------------
     private val tick = object : Runnable {
         override fun run() {
             invalidate()
@@ -99,55 +101,57 @@ class LockView(ctx: Context, startExpanded: Boolean) : View(ctx) {
     private val playHit = RectF()
     private val nextHit = RectF()
     private val textHit = RectF()
+    private val square = RectF()
 
     // ---- Paints. ---------------------------------------------------------------------------------
     private val bmpPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val fade = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val clockPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        textAlign = Paint.Align.CENTER
-        textSize = dp(86f)
-        typeface = weight(600)
-        setShadowLayer(dp(12f), 0f, dp(1f), 0x40000000)
+    private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = dp(1f)
+    }
+    private val wallPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { color = Look.WHITE }
+    private val fadePaint = Paint().apply {
+        // A unit gradient, stretched onto the bottom of the cover each frame.
+        shader = LinearGradient(0f, 0f, 0f, 1f, 0x00000000, Look.BLACK, Shader.TileMode.CLAMP)
+    }
+    private val shadePaint = Paint()
+    private val fadeMatrix = Matrix()
+    private val coverMatrix = Matrix()
+    private val clockPaint = Look.dotPaint(ctx, dp(92f), Look.WHITE, 900).apply {
+        setShadowLayer(dp(10f), 0f, 0f, 0x66000000)
     }
     private val datePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xE6FFFFFF.toInt()
-        textAlign = Paint.Align.CENTER
-        textSize = dp(19f)
-        typeface = weight(600)
-        setShadowLayer(dp(8f), 0f, dp(1f), 0x40000000)
-    }
-    private val titlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        textSize = dp(17f)
-        typeface = weight(600)
-    }
-    private val artistPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x99FFFFFF.toInt()
-        textSize = dp(16f)
-        typeface = weight(400)
-    }
-    private val timePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x99FFFFFF.toInt()
-        textSize = dp(12f)
-        typeface = weight(500)
-        isFakeBoldText = false
-    }
-    private val hintPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x99FFFFFF.toInt()
+        color = Look.WHITE
         textAlign = Paint.Align.CENTER
         textSize = dp(13f)
-        typeface = weight(500)
+        typeface = Look.mono(ctx)
+        letterSpacing = 0.12f
+        setShadowLayer(dp(8f), 0f, 0f, 0x66000000)
     }
-    private val glyph = Path()
-    private val clip = Path()
-    private val src = Rect()
+    private val titlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Look.WHITE
+        textSize = dp(15f)
+        typeface = Look.monoBold(ctx)
+    }
+    private val artistPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Look.GREY
+        textSize = dp(12f)
+        typeface = Look.mono(ctx)
+        letterSpacing = 0.06f
+    }
+    private val timePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Look.GREY
+        textSize = dp(11f)
+        typeface = Look.mono(ctx)
+    }
+    private val hintPaint = TextPaint(Look.dotPaint(ctx, dp(12f), Look.GREY, 800)).apply {
+        textAlign = Paint.Align.CENTER
+        letterSpacing = 0.12f
+    }
 
-    private val timeFmt = SimpleDateFormat(
-        if (DateFormat.is24HourFormat(ctx)) "H:mm" else "h:mm", Locale.getDefault()
-    )
-    private val dateFmt = SimpleDateFormat(DateFormat.getBestDateTimePattern(Locale.getDefault(), "EEEEdMMMM"), Locale.getDefault())
+    private val timeFmt = SimpleDateFormat(if (DateFormat.is24HourFormat(ctx)) "HH:mm" else "h:mm", Locale.getDefault())
+    private val dateFmt = SimpleDateFormat(DateFormat.getBestDateTimePattern(Locale.getDefault(), "EEEdMMM"), Locale.getDefault())
 
     init {
         isClickable = true
@@ -158,11 +162,31 @@ class LockView(ctx: Context, startExpanded: Boolean) : View(ctx) {
         track = t
         if (t.artKey != artKey) {
             artKey = t.artKey
+            rebuildWall()
             val a = t.art
-            blur = a?.let { runCatching { Art.blurred(it) }.getOrNull() }
-            edge = a?.let { runCatching { Art.edgeColor(it) }.getOrNull() } ?: 0xFF202020.toInt()
+            dots = if (dotCover && a != null) runCatching { DotArt(a, 44) }.getOrNull() else null
+            coverPaint = a?.let { bmp ->
+                // Centre-crop in case the app hands over a cover that isn't square.
+                coverSize = min(bmp.width, bmp.height).toFloat()
+                Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+                    shader = BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+                }
+            }
         }
         invalidate()
+    }
+
+    private fun rebuildWall() {
+        if (width == 0 || height == 0) return
+        wall = runCatching { DotWall(track?.art, width, height, dp(11f)).render(dp(1.1f)) }.getOrNull()
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        rebuildWall()
+        // Darker over the dot cover: dot-matrix time on dots needs the help.
+        val shade = if (dotCover) 0x99000000.toInt() else 0x66000000
+        shadePaint.shader = LinearGradient(0f, 0f, 0f, dp(280f), shade, 0x00000000, Shader.TileMode.CLAMP)
     }
 
     override fun onAttachedToWindow() {
@@ -190,18 +214,17 @@ class LockView(ctx: Context, startExpanded: Boolean) : View(ctx) {
         val h = height.toFloat()
         val side = dp(16f)
         val cardH = dp(196f)
-        val cardBottom = h - insetBottom - dp(72f)
+        val cardBottom = h - insetBottom - dp(76f)
         card.set(side, cardBottom - cardH, w - side, cardBottom)
 
         val thumb = dp(64f)
         small.set(card.left + dp(16f), card.top + dp(16f), card.left + dp(16f) + thumb, card.top + dp(16f) + thumb)
 
-        // Big: as wide as the screen (capped on wide or short screens), from the very top.
-        val size = min(w, min(h * 0.62f, card.top + dp(24f)))
-        big.set((w - size) / 2f, 0f, (w + size) / 2f, size)
+        // Big: the whole screen from the top down to the song title, the cover centre-cropped to fit.
+        big.set(0f, 0f, w, max(w, card.top + dp(24f)))
 
-        val barY = small.bottom + dp(22f)
-        bar.set(card.left + dp(16f), barY, card.right - dp(16f), barY + dp(6f))
+        val barY = small.bottom + dp(24f)
+        bar.set(card.left + dp(20f), barY - dp(3f), card.right - dp(20f), barY + dp(3f))
 
         val cy = card.bottom - dp(36f)
         val cx = card.centerX()
@@ -219,167 +242,167 @@ class LockView(ctx: Context, startExpanded: Boolean) : View(ctx) {
         val t = track
         val q = p.coerceIn(0f, 1f)
 
+        canvas.drawColor(Look.BLACK)
         canvas.save()
         canvas.translate(0f, dragY)
 
-        // 1. Wallpaper: the blurred cover, dimmed; then the cover's own colour as it grows.
-        val b = blur
-        if (b != null) {
-            src.set(0, 0, b.width, b.height)
-            val scale = max(w / b.width, h / b.height)
-            val bw = b.width * scale
-            val bh = b.height * scale
-            art.set((w - bw) / 2f, (h - bh) / 2f, (w + bw) / 2f, (h + bh) / 2f)
-            canvas.drawBitmap(b, src, art, bmpPaint)
-            canvas.drawColor(0x66000000)
-        } else {
-            canvas.drawColor(0xFF1A1A1A.toInt())
-        }
-        if (q > 0f) {
-            fill.color = edge
-            fill.alpha = (255 * q).toInt()
-            canvas.drawRect(0f, 0f, w, h, fill)
+        // 1. Wallpaper: the dot grid, each dot sized by the cover. It dims as the cover grows.
+        wall?.let {
+            // Gone once the cover is big, so nothing shows through under it.
+            wallPaint.alpha = (255 * (1f - q)).toInt()
+            canvas.drawBitmap(it, 0f, 0f, wallPaint)
         }
 
-        // 2. The frosted card, fading out as the cover leaves it.
-        fill.color = 0x2EFFFFFF
-        fill.alpha = (0x2E * (1f - q)).toInt()
-        if (fill.alpha > 0) canvas.drawRoundRect(card, dp(26f), dp(26f), fill)
+        // 2. The black card, fading out as the cover leaves it.
+        val cardAlpha = 1f - q
+        if (cardAlpha > 0f) {
+            fill.color = Look.SURFACE
+            fill.alpha = (0xF0 * cardAlpha).toInt()
+            canvas.drawRoundRect(card, dp(24f), dp(24f), fill)
+            stroke.color = Look.LINE
+            stroke.alpha = (255 * cardAlpha).toInt()
+            canvas.drawRoundRect(card, dp(24f), dp(24f), stroke)
+        }
 
         // 3. The cover, on its way between the thumbnail and the top of the screen.
         lerp(small, big, p, art)
-        val radius = dp(10f) * (1f - q)
-        drawCover(canvas, t?.art, art, radius)
+        drawCover(canvas, art, dp(12f) * (1f - q))
         if (q > 0f) {
-            // Melt the bottom of the big cover into the background colour.
-            val fadeTop = art.top + art.height() * 0.62f
-            fade.shader = LinearGradient(
-                0f, fadeTop, 0f, art.bottom + 1f,
-                edge and 0x00FFFFFF, edge, Shader.TileMode.CLAMP
-            )
-            fade.alpha = (255 * q).toInt()
-            canvas.drawRect(art.left - 1f, fadeTop, art.right + 1f, art.bottom + 1f, fade)
-            if (art.width() < w) {
-                // On wide screens the sides blend too.
-                fill.color = edge
-                fill.alpha = (255 * q).toInt()
-                canvas.drawRect(0f, 0f, art.left, h, fill)
-                canvas.drawRect(art.right, 0f, w, h, fill)
-            }
+            // Fade the bottom of the big cover into black.
+            val fadeTop = art.top + art.height() * 0.58f
+            fadeMatrix.setScale(1f, art.bottom + 1f - fadeTop)
+            fadeMatrix.postTranslate(0f, fadeTop)
+            fadePaint.shader.setLocalMatrix(fadeMatrix)
+            fadePaint.alpha = (255 * q).toInt()
+            canvas.drawRect(art.left - 1f, fadeTop, art.right + 1f, art.bottom + 1f, fadePaint)
             // A little shade behind the clock so it reads on bright covers.
-            fade.shader = LinearGradient(0f, 0f, 0f, dp(260f), 0x55000000, 0x00000000, Shader.TileMode.CLAMP)
-            fade.alpha = (255 * q).toInt()
-            canvas.drawRect(0f, 0f, w, dp(260f), fade)
+            shadePaint.alpha = (255 * q).toInt()
+            canvas.drawRect(0f, 0f, w, dp(280f), shadePaint)
         }
 
-        // 4. Date and time.
+        // 4. Date and dot-matrix time, with the colon in red.
         val now = Date()
-        val dateY = insetTop + dp(58f)
-        canvas.drawText(dateFmt.format(now), w / 2f, dateY, datePaint)
-        canvas.drawText(timeFmt.format(now), w / 2f, dateY + dp(84f), clockPaint)
+        val dateY = insetTop + dp(56f)
+        canvas.drawText(dateFmt.format(now).uppercase(), w / 2f, dateY, datePaint)
+        drawClock(canvas, timeFmt.format(now), w / 2f, dateY + dp(92f))
 
         // 5. Song, progress and buttons.
         if (t != null) drawPlayer(canvas, t, q)
 
         // 6. How to leave.
-        hintPaint.alpha = (0x99 * (1f + dragY / dp(160f)).coerceIn(0f, 1f)).toInt()
-        canvas.drawText("Swipe up to open", w / 2f, h - insetBottom - dp(28f), hintPaint)
+        val hintAlpha = (1f + dragY / dp(160f)).coerceIn(0f, 1f)
+        val hy = h - insetBottom - dp(28f)
+        fill.color = Look.GREY
+        fill.alpha = (255 * hintAlpha).toInt()
+        val arrow = dp(9f)
+        Glyph.ARROW.draw(canvas, w / 2f - Glyph.ARROW.width(arrow) / 2f, hy - dp(22f), arrow, fill)
+        hintPaint.alpha = (255 * hintAlpha).toInt()
+        canvas.drawText("SWIPE UP TO UNLOCK", w / 2f, hy, hintPaint)
         canvas.restore()
     }
 
-    private fun drawCover(canvas: Canvas, a: Bitmap?, r: RectF, radius: Float) {
-        canvas.save()
-        clip.reset()
-        clip.addRoundRect(r, radius, radius, Path.Direction.CW)
-        canvas.clipPath(clip)
-        if (a != null) {
-            // Centre-crop in case the app hands over a cover that isn't square.
-            val s = min(a.width, a.height)
-            src.set((a.width - s) / 2, (a.height - s) / 2, (a.width + s) / 2, (a.height + s) / 2)
-            canvas.drawBitmap(a, src, r, bmpPaint)
-        } else {
-            fill.color = 0xFF3A3A3C.toInt()
-            fill.alpha = 255
-            canvas.drawRect(r, fill)
-            // A simple note when there's no cover.
-            val cx = r.centerX()
-            val cy = r.centerY()
-            val u = r.width() / 12f
-            fill.color = 0xFF8E8E93.toInt()
-            canvas.drawCircle(cx - u, cy + u * 2f, u * 1.2f, fill)
-            canvas.drawRect(cx - u + u * 0.8f, cy - u * 3f, cx + u * 0.4f, cy + u * 2f, fill)
-            canvas.drawRect(cx - u + u * 0.8f, cy - u * 3f, cx + u * 2.4f, cy - u * 1.8f, fill)
+    private fun drawClock(canvas: Canvas, time: String, cx: Float, baseline: Float) {
+        val i = time.indexOf(':')
+        if (i < 0) {
+            clockPaint.textAlign = Paint.Align.CENTER
+            canvas.drawText(time, cx, baseline, clockPaint)
+            return
         }
-        canvas.restore()
+        val hh = time.substring(0, i)
+        val mm = time.substring(i + 1)
+        clockPaint.textAlign = Paint.Align.LEFT
+        val wh = clockPaint.measureText(hh)
+        val wc = clockPaint.measureText(":")
+        val wm = clockPaint.measureText(mm)
+        var x = cx - (wh + wc + wm) / 2f
+        clockPaint.color = Look.WHITE
+        canvas.drawText(hh, x, baseline, clockPaint)
+        x += wh
+        clockPaint.color = Look.accent
+        canvas.drawText(":", x, baseline, clockPaint)
+        x += wc
+        clockPaint.color = Look.WHITE
+        canvas.drawText(mm, x, baseline, clockPaint)
+    }
+
+    private fun drawCover(canvas: Canvas, r: RectF, radius: Float) {
+        val dotArt = dots
+        val cp = coverPaint
+        when {
+            dotArt != null -> {
+                // The colour halftone version of the cover, on black, cropped like the picture.
+                fill.color = Look.BLACK
+                canvas.drawRoundRect(r, radius, radius, fill)
+                val side = max(r.width(), r.height())
+                square.set(r.centerX() - side / 2f, r.centerY() - side / 2f, r.centerX() + side / 2f, r.centerY() + side / 2f)
+                canvas.save()
+                canvas.clipRect(r)
+                dotArt.draw(canvas, square, fill, round = false, alpha = 255, colored = true)
+                canvas.restore()
+            }
+            cp != null -> {
+                // A shader, not a clip, so the rounded corners stay smooth while it grows.
+                val bmp = track?.art ?: return
+                val scale = max(r.width(), r.height()) / coverSize
+                coverMatrix.setTranslate(-bmp.width / 2f, -bmp.height / 2f)
+                coverMatrix.postScale(scale, scale)
+                coverMatrix.postTranslate(r.centerX(), r.centerY())
+                cp.shader.setLocalMatrix(coverMatrix)
+                canvas.drawRoundRect(r, radius, radius, cp)
+            }
+            else -> {
+                fill.color = Look.RAISED
+                canvas.drawRoundRect(r, radius, radius, fill)
+                fill.color = Look.GREY
+                val g = r.height() * 0.36f
+                Glyph.HEADPHONES.draw(canvas, r.centerX() - Glyph.HEADPHONES.width(g) / 2f, r.centerY(), g, fill)
+            }
+        }
     }
 
     private fun drawPlayer(canvas: Canvas, t: NowPlaying.Track, q: Float) {
         // Title and artist sit beside the thumbnail, then slide left into the space it leaves.
-        val textLeft = lerp(small.right + dp(14f), card.left + dp(16f), q)
-        val textRight = card.right - dp(16f)
-        val titleY = lerp(small.top + dp(26f), small.top + dp(20f), q)
+        val textLeft = lerp(small.right + dp(14f), card.left + dp(20f), q)
+        val textRight = card.right - dp(20f)
+        val titleY = lerp(small.top + dp(28f), small.top + dp(22f), q)
         val avail = textRight - textLeft
         canvas.drawText(ellipsize(t.title, titlePaint, avail), textLeft, titleY, titlePaint)
-        canvas.drawText(ellipsize(t.artist, artistPaint, avail), textLeft, titleY + dp(24f), artistPaint)
-        textHit.set(textLeft, titleY - dp(22f), textRight, titleY + dp(32f))
+        canvas.drawText(ellipsize(t.artist.uppercase(), artistPaint, avail), textLeft, titleY + dp(22f), artistPaint)
+        textHit.set(textLeft, titleY - dp(22f), textRight, titleY + dp(30f))
 
-        // Progress.
+        // Progress: a row of dots, lit up to the red head.
         val dur = t.durationMs
         val pos = scrubMs ?: t.positionNow()
         val frac = if (dur > 0) (pos.toFloat() / dur).coerceIn(0f, 1f) else 0f
-        val thick = if (scrubMs != null) dp(10f) else dp(6f)
         val cy = bar.centerY()
-        val r = thick / 2f
-        fill.color = 0x40FFFFFF
-        fill.alpha = 0x40
-        canvas.drawRoundRect(bar.left, cy - r, bar.right, cy + r, r, r, fill)
-        fill.color = if (scrubMs != null) Color.WHITE else 0xCCFFFFFF.toInt()
-        canvas.drawRoundRect(bar.left, cy - r, bar.left + bar.width() * frac, cy + r, r, r, fill)
+        val pitch = dp(7f)
+        val count = (bar.width() / pitch).toInt().coerceAtLeast(2)
+        val step = bar.width() / (count - 1)
+        val head = bar.left + bar.width() * frac
+        for (i in 0 until count) {
+            val x = bar.left + i * step
+            fill.color = if (x <= head) Look.WHITE else Look.DOT_OFF
+            canvas.drawCircle(x, cy, dp(1.8f), fill)
+        }
+        if (dur > 0) {
+            fill.color = Look.accent
+            canvas.drawCircle(head, cy, if (scrubMs != null) dp(8f) else dp(5f), fill)
+        }
         val ty = cy + dp(22f)
         timePaint.textAlign = Paint.Align.LEFT
         canvas.drawText(fmt(pos), bar.left, ty, timePaint)
         timePaint.textAlign = Paint.Align.RIGHT
         canvas.drawText(if (dur > 0) "-" + fmt(dur - pos) else "", bar.right, ty, timePaint)
 
-        // Buttons.
-        fill.color = Color.WHITE
-        fill.alpha = if (pressed === playHit) 0x80 else 0xFF
-        if (t.playing) drawPause(canvas, playHit.centerX(), playHit.centerY(), dp(15f))
-        else drawPlay(canvas, playHit.centerX(), playHit.centerY(), dp(15f))
-        fill.alpha = if (pressed === prevHit) 0x80 else 0xFF
-        drawSkip(canvas, prevHit.centerX(), prevHit.centerY(), dp(11f), forward = false)
-        fill.alpha = if (pressed === nextHit) 0x80 else 0xFF
-        drawSkip(canvas, nextHit.centerX(), nextHit.centerY(), dp(11f), forward = true)
+        // Dot-matrix buttons.
+        drawButton(canvas, if (t.playing) Glyph.PAUSE else Glyph.PLAY, playHit, dp(28f))
+        drawButton(canvas, Glyph.PREV, prevHit, dp(21f))
+        drawButton(canvas, Glyph.NEXT, nextHit, dp(21f))
     }
 
-    private fun drawPlay(canvas: Canvas, cx: Float, cy: Float, s: Float) {
-        glyph.reset()
-        glyph.moveTo(cx - s * 0.7f, cy - s)
-        glyph.lineTo(cx + s, cy)
-        glyph.lineTo(cx - s * 0.7f, cy + s)
-        glyph.close()
-        canvas.drawPath(glyph, fill)
-    }
-
-    private fun drawPause(canvas: Canvas, cx: Float, cy: Float, s: Float) {
-        val bw = s * 0.52f
-        val gap = s * 0.34f
-        val rr = bw * 0.3f
-        canvas.drawRoundRect(cx - gap - bw, cy - s, cx - gap, cy + s, rr, rr, fill)
-        canvas.drawRoundRect(cx + gap, cy - s, cx + gap + bw, cy + s, rr, rr, fill)
-    }
-
-    private fun drawSkip(canvas: Canvas, cx: Float, cy: Float, s: Float, forward: Boolean) {
-        val dir = if (forward) 1f else -1f
-        glyph.reset()
-        for (k in 0..1) {
-            val x0 = cx + dir * (if (k == 0) -s * 1.4f else 0f)
-            glyph.moveTo(x0, cy - s)
-            glyph.lineTo(x0 + dir * s * 1.4f, cy)
-            glyph.lineTo(x0, cy + s)
-            glyph.close()
-        }
-        canvas.drawPath(glyph, fill)
+    private fun drawButton(canvas: Canvas, g: Glyph, hit: RectF, size: Float) {
+        fill.color = if (pressed === hit) Look.GREY else Look.WHITE
+        g.draw(canvas, hit.centerX() - g.width(size) / 2f, hit.centerY(), size, fill)
     }
 
     // ---- Touch. ----------------------------------------------------------------------------------
@@ -437,7 +460,7 @@ class LockView(ctx: Context, startExpanded: Boolean) : View(ctx) {
                     Mode.SWIPE -> {
                         val speed = dragY / max(1L, SystemClock.uptimeMillis() - downAt) * 1000f
                         if (dragY < -dp(110f) || speed < -dp(900f)) {
-                            performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                            performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                             onUnlock?.invoke()
                         }
                         settleDrag()
@@ -472,7 +495,7 @@ class LockView(ctx: Context, startExpanded: Boolean) : View(ctx) {
             else -> return
         }
         performClick()
-        performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
     }
 
     override fun performClick(): Boolean = super.performClick()
@@ -508,12 +531,16 @@ class LockView(ctx: Context, startExpanded: Boolean) : View(ctx) {
 
     // ---- Helpers. --------------------------------------------------------------------------------
 
-    private fun weight(w: Int): Typeface =
-        if (Build.VERSION.SDK_INT >= 28) Typeface.create(Typeface.DEFAULT, w, false)
-        else Typeface.create("sans-serif-medium", Typeface.NORMAL)
+    private val fitted = HashMap<String, String>()
 
-    private fun ellipsize(s: String, paint: TextPaint, width: Float): String =
-        TextUtils.ellipsize(s, paint, max(0f, width), TextUtils.TruncateAt.END).toString()
+    /** Ellipsized text, cached: the title is re-fitted every frame while the cover moves. */
+    private fun ellipsize(s: String, paint: TextPaint, width: Float): String {
+        val key = "${paint.textSize}|${width.toInt()}|$s"
+        return fitted.getOrPut(key) {
+            if (fitted.size > 64) fitted.clear()
+            TextUtils.ellipsize(s, paint, max(0f, width), TextUtils.TruncateAt.END).toString()
+        }
+    }
 
     private fun fmt(ms: Long): String {
         val s = (ms / 1000).coerceAtLeast(0)

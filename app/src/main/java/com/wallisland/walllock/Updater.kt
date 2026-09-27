@@ -1,8 +1,5 @@
 package com.wallisland.walllock
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -111,7 +108,6 @@ object Updater {
         progress: (Int) -> Unit,
         committed: () -> Unit,
         failed: (String) -> Unit,
-        interactive: Boolean = true,
     ) {
         val app = ctx.applicationContext
         Thread {
@@ -121,7 +117,7 @@ object Updater {
                 val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
                     .apply {
                         setAppPackageName(app.packageName)
-                        // Android 12+: once Walllock installed itself, it may update itself without a prompt.
+                        // Android 12+: once Walllock installed itself, Update installs without another prompt.
                         if (Build.VERSION.SDK_INT >= 31) {
                             setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
                         }
@@ -154,9 +150,7 @@ object Updater {
                     (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
                 val status = PendingIntent.getBroadcast(
                     app, 3,
-                    Intent(app, InstallResultReceiver::class.java)
-                        .putExtra(EXTRA_INTERACTIVE, interactive)
-                        .putExtra(EXTRA_BUILD, release.build),
+                    Intent(app, InstallResultReceiver::class.java),
                     flags,
                 )
                 s.commit(status.intentSender)
@@ -196,75 +190,6 @@ object Updater {
 
     private fun get(url: String): String = open(url, json = true).let { c -> c.inputStream.bufferedReader().use { it.readText() } }
 
-    // ---- Automatic updates ---------------------------------------------------------------------
-
-    const val EXTRA_INTERACTIVE = "interactive"
-    const val EXTRA_BUILD = "build"
-    private const val CHANNEL = "updates"
-    private const val NOTIFICATION_ID = 8
-    private const val AUTO_EVERY_MS = 6 * 60 * 60_000L
-    @Volatile private var autoRunning = false
-
-    /**
-     * Called from the always-running listener: with automatic updates on, checks at most every six
-     * hours and installs a newer build in the background. Silent on Android 12+ once Walllock has
-     * installed an update itself; otherwise it leaves a notification to tap.
-     */
-    fun autoUpdate(ctx: Context) {
-        val prefs = Prefs(ctx)
-        if (!prefs.autoUpdate || autoRunning) return
-        val now = System.currentTimeMillis()
-        if (now - prefs.lastUpdateCheck in 0 until AUTO_EVERY_MS) return
-        prefs.lastUpdateCheck = now
-        autoRunning = true
-        val app = ctx.applicationContext
-        check(app) { result ->
-            if (result !is Check.Available) {
-                autoRunning = false
-                return@check
-            }
-            if (!app.packageManager.canRequestPackageInstalls()) {
-                autoRunning = false
-                notify(app, "Walllock build ${result.release.build} is out", "Tap to open Walllock and update.",
-                    Intent(app, MainActivity::class.java))
-                return@check
-            }
-            install(app, result.release,
-                progress = {},
-                committed = { autoRunning = false },
-                failed = { autoRunning = false },
-                interactive = false,
-            )
-        }
-    }
-
-    /** A plain notification that opens [target]; used when an update needs the user. */
-    fun notify(ctx: Context, title: String, text: String, target: Intent) {
-        val nm = ctx.getSystemService(NotificationManager::class.java)
-        if (!nm.areNotificationsEnabled()) return
-        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Updates", NotificationManager.IMPORTANCE_DEFAULT))
-        val pi = PendingIntent.getActivity(
-            ctx, 4, target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        val n = Notification.Builder(ctx, CHANNEL)
-            .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle(title)
-            .setContentText(text)
-            .setContentIntent(pi)
-            .setAutoCancel(true)
-            .build()
-        try {
-            nm.notify(NOTIFICATION_ID, n)
-        } catch (_: SecurityException) {
-        }
-    }
-
-    /** Resets the six-hour wait, so switching automatic updates on checks straight away. */
-    fun resetAutoTimer(ctx: Context) {
-        Prefs(ctx).lastUpdateCheck = 0L
-    }
-
     private fun friendly(e: Exception): String = when (e) {
         is java.net.UnknownHostException -> "No internet connection"
         is java.net.SocketTimeoutException -> "GitHub took too long to answer"
@@ -279,16 +204,10 @@ class InstallResultReceiver : BroadcastReceiver() {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 @Suppress("DEPRECATION")
                 val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT) ?: return
-                if (intent.getBooleanExtra(Updater.EXTRA_INTERACTIVE, true)) {
-                    confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    try {
-                        context.startActivity(confirm)
-                    } catch (_: Exception) {
-                    }
-                } else {
-                    // Downloaded in the background: Android wants a tap to install this one.
-                    val build = intent.getIntExtra(Updater.EXTRA_BUILD, 0)
-                    Updater.notify(context, "Walllock build $build is ready", "Tap to install the update.", confirm)
+                confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                try {
+                    context.startActivity(confirm)
+                } catch (_: Exception) {
                 }
             }
             PackageInstaller.STATUS_SUCCESS -> Unit // The app restarts into the new version.
@@ -299,7 +218,7 @@ class InstallResultReceiver : BroadcastReceiver() {
                     Toast.LENGTH_LONG,
                 ).show()
             PackageInstaller.STATUS_FAILURE_ABORTED -> Unit // User tapped Cancel.
-            else -> if (intent.getBooleanExtra(Updater.EXTRA_INTERACTIVE, true)) {
+            else -> {
                 val msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Update failed"
                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
             }

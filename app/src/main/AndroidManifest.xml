@@ -6,10 +6,10 @@
     <!-- Android 15 and newer: the cover screen is opened through a full-screen notification. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- In-app and automatic updates from this app's GitHub releases. -->
+    <!-- In-app updates from this app's GitHub releases, when you tap Check. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-    <!-- Android 12+: lets Walllock update itself without a prompt once it installed itself. -->
+    <!-- Android 12+: once Walllock installed itself, Update needs no second prompt. -->
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
     <application

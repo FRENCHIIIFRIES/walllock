@@ -1,23 +1,26 @@
 # Walllock
 
-The iPhone's full-screen album cover, on the Android lock screen. While music plays, turning the
-screen off puts a now-playing screen on top of the lock screen, and tapping the cover makes it big.
+The iPhone's full-screen album cover, on the Android lock screen, drawn in the Nothing design
+language: black, white, one red, and dots everywhere. While music plays, locking the phone puts a
+now-playing screen on top of the lock screen, and tapping the cover makes it big.
 
 ## What it does
 
-- **Cover wallpaper.** The album cover blurred across the whole screen, with the big clock and date
-  on top.
-- **Player card.** Cover thumbnail, song and artist, a progress bar you can drag to scrub, and
-  previous / play-pause / next.
-- **Tap the cover** and it springs up to fill the top of the screen, melting into its own colour
-  below. Tap it again to shrink it back. It remembers which you left it on.
+- **Dot wallpaper.** A faint Nothing dot grid where every dot is sized by the album cover, with a big
+  dot-matrix clock (red colon) and the date on top.
+- **Player card.** Cover thumbnail, song and artist, a dotted progress bar with a red head you can
+  drag to scrub, and dot-matrix previous / play-pause / next.
+- **Tap the cover** and it springs up to fill the screen down to the song title, fading into black.
+  Tap it again to shrink it back. It remembers which you left it on.
+- **Dot-matrix cover** (optional): the cover drawn as a colour halftone of dots.
 - **Open the app.** Tap the song title to unlock and jump to the music app.
 - **Swipe up** to unlock as usual (PIN, fingerprint or face). Unlocking with fingerprint or face
   straight away also closes it.
 - **After pausing** it keeps showing for 10 minutes, like the iPhone (can be turned off).
 
 Android doesn't let apps replace the real lock screen, so Walllock sits on top of it the way alarm
-and call screens do.
+and call screens do. It only ever shows while the phone is actually locked (it waits for phones
+that lock a few seconds after the screen goes off), and it leaves the moment you unlock.
 
 ## Install
 
@@ -44,14 +47,9 @@ Requires Android 8.0 (API 26) or newer.
 
 ### Updating
 
-Walllock updates itself from this repo's releases. Open it and scroll to **Updates**: it checks
-when the app opens, and **Update** downloads and installs the new build in place (the first time,
-Android asks you to allow Walllock to install apps).
-
-**Update automatically** is on by default: every few hours, while the screen is off, Walllock checks
-for a new build and installs it. The first update asks you to confirm; after that, on Android 12 and
-newer, updates install quietly in the background. On older Android, or when Android still wants a
-confirmation, you get a notification to tap instead.
+Open Walllock and scroll to **Updates**, then tap **Check**. It never checks by itself. If a newer
+build is out, the button becomes **Update**, which downloads and installs it in place (the first
+time, Android asks you to allow Walllock to install apps).
 
 ## How it works
 
@@ -62,4 +60,11 @@ confirmation, you get a notification to tap instead.
   over the lock screen. Up to Android 14 it's started directly; from Android 15 it's opened through
   a silent full-screen notification.
 - `LockView` draws everything by hand, so the cover can grow from the thumbnail to full size on a
-  spring, iPhone style.
+  spring, iPhone style. The dot wallpaper is rendered once per song into an alpha mask, so each
+  frame of the animation is a handful of draws.
+
+## Fonts
+
+[Doto](https://fonts.google.com/specimen/Doto) (dot-matrix) and
+[Space Mono](https://fonts.google.com/specimen/Space+Mono), both under the SIL Open Font License
+(see `licenses/`). Walllock is not affiliated with Nothing Technology.

@@ -15,15 +15,10 @@ class Prefs(ctx: Context) {
         get() = sp.getBoolean("show_paused", true)
         set(v) = sp.edit().putBoolean("show_paused", v).apply()
 
-    /** Check GitHub for new builds in the background and install them. */
-    var autoUpdate: Boolean
-        get() = sp.getBoolean("auto_update", true)
-        set(v) = sp.edit().putBoolean("auto_update", v).apply()
-
-    /** Wall-clock time of the last automatic update check. */
-    var lastUpdateCheck: Long
-        get() = sp.getLong("last_update_check", 0L)
-        set(v) = sp.edit().putLong("last_update_check", v).apply()
+    /** Draw the cover as a colour halftone of dots instead of the picture itself. */
+    var dotCover: Boolean
+        get() = sp.getBoolean("dot_cover", false)
+        set(v) = sp.edit().putBoolean("dot_cover", v).apply()
 
     /** Whether the cover was last left big; the next lock screen opens the same way. */
     var expanded: Boolean

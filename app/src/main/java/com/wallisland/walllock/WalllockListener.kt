@@ -1,5 +1,6 @@
 package com.wallisland.walllock
 
+import android.app.KeyguardManager
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
@@ -17,7 +18,10 @@ import android.service.notification.NotificationListenerService
 
 /**
  * Watches the media sessions (notification access is what lets an app see them) and puts the cover
- * screen up whenever the screen turns off while music is playing, so it's there on the next wake.
+ * screen up once the phone is locked while music is playing, so it's there on the next wake.
+ *
+ * Only ever while the phone is really locked: many phones lock a few seconds after the screen goes
+ * off, and showing it before then would leave it sitting over the home screen.
  */
 class WalllockListener : NotificationListenerService() {
 
@@ -34,15 +38,35 @@ class WalllockListener : NotificationListenerService() {
         override fun onReceive(c: Context, i: Intent) {
             when (i.action) {
                 Intent.ACTION_SCREEN_OFF -> {
-                    maybeShow()
-                    // While the phone is put away is a good moment to fetch an update.
-                    Updater.autoUpdate(this@WalllockListener)
+                    waited = 0
+                    main.removeCallbacks(waitForLock)
+                    main.post(waitForLock)
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    main.removeCallbacks(waitForLock)
+                    // Woken before the lock kicked in: never cover the home screen.
+                    if (!locked()) LockActivity.close() else if (!LockActivity.showing) maybeShow()
                 }
                 // Unlocked by fingerprint or face straight past us: get out of the way.
                 Intent.ACTION_USER_PRESENT -> LockActivity.close()
             }
         }
     }
+
+    private var waited = 0
+
+    /** After the screen goes off, waits (up to a minute) for the phone to actually lock. */
+    private val waitForLock = object : Runnable {
+        override fun run() {
+            if (locked()) {
+                maybeShow()
+            } else if (++waited < 60) {
+                main.postDelayed(this, 1000)
+            }
+        }
+    }
+
+    private fun locked(): Boolean = getSystemService(KeyguardManager::class.java).isKeyguardLocked
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -57,12 +81,12 @@ class WalllockListener : NotificationListenerService() {
         }
         val f = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_USER_PRESENT)
         }
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(screen, f, Context.RECEIVER_NOT_EXPORTED)
         else registerReceiver(screen, f)
         receiverOn = true
-        Updater.autoUpdate(this)
     }
 
     override fun onListenerDisconnected() {
@@ -86,6 +110,7 @@ class WalllockListener : NotificationListenerService() {
         } catch (_: Exception) {
         }
         sessions = null
+        main.removeCallbacks(waitForLock)
         unbind()
         if (receiverOn) {
             try {
