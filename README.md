@@ -1,26 +1,27 @@
 # Walllock
 
-The iPhone's full-screen album cover, on the Android lock screen, drawn in the Nothing design
-language: black, white, one red, and dots everywhere. While music plays, locking the phone puts a
-now-playing screen on top of the lock screen, and tapping the cover makes it big.
+The iPhone's full-screen album cover for the Android lock screen, with a Nothing twist. While music
+plays, your lock screen wallpaper becomes the album cover. Your phone's own clock, notifications and
+media player stay exactly where they are, on top of it. When the music stops, your wallpaper comes
+back.
 
 ## What it does
 
-- **Dot wallpaper.** A faint Nothing dot grid where every dot is sized by the album cover, with a big
-  dot-matrix clock (red colon) and the date on top.
-- **Player card.** Cover thumbnail, song and artist, a dotted progress bar with a red head you can
-  drag to scrub, and dot-matrix previous / play-pause / next.
-- **Tap the cover** and it springs up to fill the screen down to the song title, fading into black.
-  Tap it again to shrink it back. It remembers which you left it on.
-- **Dot-matrix cover** (optional): the cover drawn as a colour halftone of dots.
-- **Open the app.** Tap the song title to unlock and jump to the music app.
-- **Swipe up** to unlock as usual (PIN, fingerprint or face). Unlocking with fingerprint or face
-  straight away also closes it.
-- **After pausing** it keeps showing for 10 minutes, like the iPhone (can be turned off).
+- **Cover wallpaper.** The album cover fills the top of the lock screen, as wide as the screen, like
+  the iPhone.
+- **Melts into dots.** The bottom of the cover breaks up into dots of its own colours, which shrink
+  and grey out into a faint Nothing dot grid behind your notifications.
+- **Dots style.** Or the whole cover as a colour dot-matrix.
+- **Black and white.** A monochrome version, the Nothing way.
+- **Follows the music.** Changes with every song, waits a moment while you skip through, and keeps
+  the cover for 10 minutes after you pause (can be turned off).
+- **Puts your wallpaper back.** When music stops, the lock screen goes back to your home screen
+  wallpaper, or to an image you pick (for lock screens that had their own wallpaper).
+- **Quick Settings tile** to switch it on and off, even from the lock screen.
+- **Live preview** in the app.
 
-Android doesn't let apps replace the real lock screen, so Walllock sits on top of it the way alarm
-and call screens do. It only ever shows while the phone is actually locked (it waits for phones
-that lock a few seconds after the screen goes off), and it leaves the moment you unlock.
+Walllock only changes the lock screen wallpaper; it never draws over the lock screen or the home
+screen.
 
 ## Install
 
@@ -32,16 +33,12 @@ On your phone, download
 ./gradlew assembleRelease   # app/build/outputs/apk/release/app-release.apk
 ```
 
-Then open Walllock and allow:
+Then open Walllock and allow **Notification access**, so it can see what's playing. On Android 13+
+this may be greyed out for sideloaded apps: go to *Settings → Apps → Walllock → ⋮ → Allow restricted
+settings*, then try again.
 
-1. **Notification access**, so it can see what's playing. On Android 13+ this may be greyed out for
-   sideloaded apps: go to *Settings → Apps → Walllock → ⋮ → Allow restricted settings*, then try again.
-2. **Notifications** (Android 13+).
-3. **Full-screen alerts** (Android 14+), which is how it appears over the lock screen on newer
-   Android.
-4. **Display over other apps** (Android 14 and older), which opens it instantly there.
-
-Play some music and tap **Preview** to see it without locking the phone.
+If your lock screen has its own wallpaper (different from the home screen), tap **Pick** under
+*When music stops* and choose it, so Walllock can put it back.
 
 Requires Android 8.0 (API 26) or newer.
 
@@ -54,14 +51,11 @@ time, Android asks you to allow Walllock to install apps).
 ## How it works
 
 - `WalllockListener` is a notification listener: that's what lets an app read the phone's media
-  sessions (song, artist, cover, position) and control them. It also listens for the screen turning
-  off.
-- When the screen turns off with music playing, it opens `LockActivity`, which is allowed to show
-  over the lock screen. Up to Android 14 it's started directly; from Android 15 it's opened through
-  a silent full-screen notification.
-- `LockView` draws everything by hand, so the cover can grow from the thumbnail to full size on a
-  spring, iPhone style. The dot wallpaper is rendered once per song into an alpha mask, so each
-  frame of the animation is a handful of draws.
+  sessions (song, artist, cover, play state).
+- `LockWall` decides when the cover should be up, draws it with `CoverArt` at the screen's size on
+  a background thread, and sets it with `WallpaperManager` as the lock screen wallpaper only
+  (`FLAG_LOCK`). Putting yours back clears the lock screen wallpaper so it follows the home screen
+  again, or sets the image you picked.
 
 ## Fonts
 

@@ -1,6 +1,5 @@
 package com.wallisland.walllock
 
-import android.app.KeyguardManager
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
@@ -13,15 +12,11 @@ import android.media.session.PlaybackState
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 
 /**
- * Watches the media sessions (notification access is what lets an app see them) and puts the cover
- * screen up once the phone is locked while music is playing, so it's there on the next wake.
- *
- * Only ever while the phone is really locked: many phones lock a few seconds after the screen goes
- * off, and showing it before then would leave it sitting over the home screen.
+ * Watches the media sessions (notification access is what lets an app see them) and tells [LockWall]
+ * whenever what's playing changes, so the lock screen wallpaper follows the song.
  */
 class WalllockListener : NotificationListenerService() {
 
@@ -34,39 +29,13 @@ class WalllockListener : NotificationListenerService() {
         bind(list.orEmpty())
     }
 
+    /**
+     * Timers don't run while the phone sleeps, so the screen turning on or off is also when a long
+     * pause gets noticed and the usual wallpaper goes back.
+     */
     private val screen = object : BroadcastReceiver() {
-        override fun onReceive(c: Context, i: Intent) {
-            when (i.action) {
-                Intent.ACTION_SCREEN_OFF -> {
-                    waited = 0
-                    main.removeCallbacks(waitForLock)
-                    main.post(waitForLock)
-                }
-                Intent.ACTION_SCREEN_ON -> {
-                    main.removeCallbacks(waitForLock)
-                    // Woken before the lock kicked in: never cover the home screen.
-                    if (!locked()) LockActivity.close() else if (!LockActivity.showing) maybeShow()
-                }
-                // Unlocked by fingerprint or face straight past us: get out of the way.
-                Intent.ACTION_USER_PRESENT -> LockActivity.close()
-            }
-        }
+        override fun onReceive(c: Context, i: Intent) = LockWall.update(this@WalllockListener, 0)
     }
-
-    private var waited = 0
-
-    /** After the screen goes off, waits (up to a minute) for the phone to actually lock. */
-    private val waitForLock = object : Runnable {
-        override fun run() {
-            if (locked()) {
-                maybeShow()
-            } else if (++waited < 60) {
-                main.postDelayed(this, 1000)
-            }
-        }
-    }
-
-    private fun locked(): Boolean = getSystemService(KeyguardManager::class.java).isKeyguardLocked
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -82,7 +51,6 @@ class WalllockListener : NotificationListenerService() {
         val f = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
-            addAction(Intent.ACTION_USER_PRESENT)
         }
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(screen, f, Context.RECEIVER_NOT_EXPORTED)
         else registerReceiver(screen, f)
@@ -110,7 +78,6 @@ class WalllockListener : NotificationListenerService() {
         } catch (_: Exception) {
         }
         sessions = null
-        main.removeCallbacks(waitForLock)
         unbind()
         if (receiverOn) {
             try {
@@ -120,14 +87,7 @@ class WalllockListener : NotificationListenerService() {
             receiverOn = false
         }
         NowPlaying.post(null)
-    }
-
-    private fun maybeShow() {
-        val prefs = Prefs(this)
-        if (!prefs.enabled) return
-        val t = NowPlaying.current ?: return
-        val recent = SystemClock.elapsedRealtime() - NowPlaying.lastPlayingAt < PAUSED_GRACE_MS
-        if (t.playing || (prefs.showPaused && recent)) LockActivity.show(this)
+        LockWall.update(this)
     }
 
     // ---- Media --------------------------------------------------------------------------------------
@@ -159,6 +119,7 @@ class WalllockListener : NotificationListenerService() {
             ?: candidates.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PAUSED }
         if (chosen == null) {
             NowPlaying.post(null)
+            LockWall.update(this)
             return
         }
         val md = chosen.metadata!!
@@ -182,6 +143,7 @@ class WalllockListener : NotificationListenerService() {
                 controller = chosen,
             )
         )
+        LockWall.update(this)
     }
 
     private fun MediaMetadata.title(): String? =
@@ -189,9 +151,6 @@ class WalllockListener : NotificationListenerService() {
             ?.takeIf { it.isNotBlank() }
 
     companion object {
-        /** How long after pausing the cover still comes up, like the iPhone's lock screen player. */
-        const val PAUSED_GRACE_MS = 10 * 60_000L
-
         fun hasAccess(ctx: Context): Boolean =
             android.provider.Settings.Secure.getString(ctx.contentResolver, "enabled_notification_listeners")
                 ?.contains(ComponentName(ctx, WalllockListener::class.java).flattenToString()) == true

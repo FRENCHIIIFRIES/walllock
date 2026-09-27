@@ -1,7 +1,6 @@
 package com.wallisland.walllock
 
 import android.content.Context
-import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.util.TypedValue
@@ -69,87 +68,3 @@ fun Context.dp(v: Float): Float = v * resources.displayMetrics.density
 fun Context.dp(v: Int): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
 fun Context.sp(v: Float): Float =
     TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, resources.displayMetrics)
-
-/**
- * Tiny dot-matrix icons. Each glyph is a grid of rows; '#' is a lit dot, anything else is off.
- * They're drawn as circles so they sit in the same visual language as the Doto type.
- */
-enum class Glyph(vararg rows: String) {
-    PLAY(
-        "##.....",
-        "####...",
-        "######.",
-        "#######",
-        "######.",
-        "####...",
-        "##.....",
-    ),
-    PAUSE(
-        "##...##",
-        "##...##",
-        "##...##",
-        "##...##",
-        "##...##",
-        "##...##",
-        "##...##",
-    ),
-    NEXT(
-        "#....##",
-        "##...##",
-        "###..##",
-        "####.##",
-        "###..##",
-        "##...##",
-        "#....##",
-    ),
-    PREV(
-        "##....#",
-        "##...##",
-        "##..###",
-        "##.####",
-        "##..###",
-        "##...##",
-        "##....#",
-    ),
-    ARROW(
-        "...#...",
-        "..###..",
-        ".#####.",
-        "#######",
-        "..###..",
-        "..###..",
-        "..###..",
-    ),
-    HEADPHONES(
-        "..###..",
-        ".#...#.",
-        "#.....#",
-        "#.....#",
-        "##...##",
-        "##...##",
-        "##...##",
-    );
-
-    val cols = rows.maxOf { it.length }
-    val rowCount = rows.size
-    private val lit: BooleanArray = BooleanArray(cols * rowCount).also { arr ->
-        rows.forEachIndexed { r, line -> line.forEachIndexed { c, ch -> arr[r * cols + c] = ch == '#' } }
-    }
-
-    /** Draws the glyph so its dot grid fills a box of [size] height, left edge at [left], centred on [cy]. */
-    fun draw(canvas: Canvas, left: Float, cy: Float, size: Float, paint: Paint, offColor: Int? = null) {
-        val pitch = size / rowCount
-        val r = pitch * 0.42f
-        val top = cy - size / 2f
-        val on = paint.color
-        for (row in 0 until rowCount) for (col in 0 until cols) {
-            val isLit = lit[row * cols + col]
-            if (!isLit && offColor == null) continue
-            paint.color = if (isLit) on else offColor!!
-            canvas.drawCircle(left + pitch * (col + 0.5f), top + pitch * (row + 0.5f), r, paint)
-        }
-        paint.color = on
-    }
-
-    fun width(size: Float): Float = size / rowCount * cols
-}
