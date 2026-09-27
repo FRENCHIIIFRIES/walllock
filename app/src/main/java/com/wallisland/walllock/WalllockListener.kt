@@ -33,7 +33,11 @@ class WalllockListener : NotificationListenerService() {
     private val screen = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             when (i.action) {
-                Intent.ACTION_SCREEN_OFF -> maybeShow()
+                Intent.ACTION_SCREEN_OFF -> {
+                    maybeShow()
+                    // While the phone is put away is a good moment to fetch an update.
+                    Updater.autoUpdate(this@WalllockListener)
+                }
                 // Unlocked by fingerprint or face straight past us: get out of the way.
                 Intent.ACTION_USER_PRESENT -> LockActivity.close()
             }
@@ -58,6 +62,7 @@ class WalllockListener : NotificationListenerService() {
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(screen, f, Context.RECEIVER_NOT_EXPORTED)
         else registerReceiver(screen, f)
         receiverOn = true
+        Updater.autoUpdate(this)
     }
 
     override fun onListenerDisconnected() {

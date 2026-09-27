@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -22,6 +23,11 @@ class MainActivity : Activity() {
 
     private lateinit var prefs: Prefs
     private val rows = mutableListOf<Pair<() -> Boolean, TextView>>()
+    private lateinit var updateText: TextView
+    private lateinit var updateButton: TextView
+    private var pendingRelease: Updater.Release? = null
+    private var updating = false
+    private var leftForInstaller = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -91,6 +97,13 @@ class MainActivity : Activity() {
         }.apply {
             (layoutParams as LinearLayout.LayoutParams).topMargin = dp(24)
         })
+
+        buildUpdates(col)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (updating) leftForInstaller = true
     }
 
     override fun onResume() {
@@ -101,6 +114,83 @@ class MainActivity : Activity() {
             action.alpha = if (ok) 0.5f else 1f
             action.isEnabled = !ok
         }
+        if (leftForInstaller) {
+            // Back from Android's "Update this app?" without it installing: let them try again.
+            leftForInstaller = false
+            updating = false
+            updateButton.isEnabled = true
+            updateText.text = "Update not installed. Tap Update to try again."
+        }
+    }
+
+    // ---- Updates. --------------------------------------------------------------------------------
+
+    private fun buildUpdates(col: LinearLayout) {
+        col.addView(header("Updates").apply { setPadding(0, dp(32), 0, dp(4)) })
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(10), 0, dp(10))
+        }
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        texts.addView(text("Build ${Updater.currentBuild(this)}", 17f))
+        updateText = text("Checking for updates…", 13f, grey = true)
+        texts.addView(updateText)
+        row.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        updateButton = button("UPDATE") { startUpdate() }.apply { visibility = View.GONE }
+        row.addView(updateButton)
+        col.addView(row)
+
+        toggle(col, "Update automatically", prefs.autoUpdate) {
+            prefs.autoUpdate = it
+            if (it) Updater.resetAutoTimer(this)
+        }
+        col.addView(text(
+            "Checks GitHub every few hours while the screen is off and installs new builds by itself. " +
+                "The first update asks you to confirm; after that Android 12 and newer installs them quietly.",
+            13f, grey = true
+        ))
+
+        Updater.check(this) { result ->
+            if (isFinishing || updating) return@check
+            when (result) {
+                is Updater.Check.Available -> {
+                    pendingRelease = result.release
+                    updateText.text = "Build ${result.release.build} is out."
+                    updateButton.visibility = View.VISIBLE
+                }
+                Updater.Check.UpToDate -> {
+                    pendingRelease = null
+                    updateText.text = "You're on the latest build."
+                    updateButton.visibility = View.GONE
+                }
+                is Updater.Check.Failed -> {
+                    pendingRelease = null
+                    updateText.text = "Couldn't check: ${result.reason}."
+                    updateButton.visibility = View.GONE
+                }
+            }
+        }
+    }
+
+    private fun startUpdate() {
+        val release = pendingRelease ?: return
+        if (updating) return
+        if (!Updater.ensureCanInstall(this)) {
+            toastLine("Allow Walllock to install updates, then tap Update again")
+            return
+        }
+        updating = true
+        updateButton.isEnabled = false
+        Updater.install(this, release,
+            progress = { pct -> updateText.text = if (pct >= 0) "Downloading… $pct%" else "Downloading…" },
+            committed = { updateText.text = "Installing build ${release.build}…" },
+            failed = { reason ->
+                updating = false
+                updateButton.isEnabled = true
+                updateText.text = "Update failed: $reason."
+            },
+        )
     }
 
     // ---- Little builders. ------------------------------------------------------------------------

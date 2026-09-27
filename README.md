@@ -42,6 +42,17 @@ Play some music and tap **Preview** to see it without locking the phone.
 
 Requires Android 8.0 (API 26) or newer.
 
+### Updating
+
+Walllock updates itself from this repo's releases. Open it and scroll to **Updates**: it checks
+when the app opens, and **Update** downloads and installs the new build in place (the first time,
+Android asks you to allow Walllock to install apps).
+
+**Update automatically** is on by default: every few hours, while the screen is off, Walllock checks
+for a new build and installs it. The first update asks you to confirm; after that, on Android 12 and
+newer, updates install quietly in the background. On older Android, or when Android still wants a
+confirmation, you get a notification to tap instead.
+
 ## How it works
 
 - `WalllockListener` is a notification listener: that's what lets an app read the phone's media
