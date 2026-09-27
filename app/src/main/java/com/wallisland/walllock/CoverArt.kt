@@ -1,116 +1,115 @@
 package com.wallisland.walllock
 
 import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
-import android.graphics.LinearGradient
+import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
-import kotlin.math.ceil
+import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Draws the lock screen wallpaper: the album cover as wide as the screen at the top, like the
- * iPhone's full-screen artwork, then the Nothing part: its bottom breaks up into dots of its own
- * colours, which shrink and grey out into a faint dot grid behind the notifications.
+ * Draws the lock screen wallpaper like the iPhone's big album art: the cover itself, untouched and
+ * whole, as a large rounded box with a soft shadow, over a blur of its own colours (or black).
  */
 object CoverArt {
-    const val COVER = 0
-    const val DOTS = 1
+    const val HIGH = 0
+    const val MIDDLE = 1
+    const val LOW = 2
 
-    /** Dots across the screen. */
-    private const val COLS = 36
-
-    fun compose(art: Bitmap, w: Int, h: Int, style: Int, mono: Boolean): Bitmap {
+    fun compose(art: Bitmap, w: Int, h: Int, blackBackground: Boolean, position: Int): Bitmap {
         val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val c = Canvas(out)
-        c.drawColor(Color.BLACK)
-
         val src = if (art.config == Bitmap.Config.HARDWARE) art.copy(Bitmap.Config.ARGB_8888, false) else art
-        // Centre-crop in case the app hands over a cover that isn't square.
-        val s = min(src.width, src.height)
-        val square = Rect((src.width - s) / 2, (src.height - s) / 2, (src.width + s) / 2, (src.height + s) / 2)
-        val side = w.toFloat()
-        val pitch = side / COLS
 
-        if (style == COVER) {
-            val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-            if (mono) p.colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
-            c.drawBitmap(src, square, RectF(0f, 0f, side, side), p)
+        if (blackBackground) {
+            c.drawColor(Color.BLACK)
+        } else {
+            val bg = blurred(src)
+            val scale = max(w.toFloat() / bg.width, h.toFloat() / bg.height)
+            val bw = bg.width * scale
+            val bh = bg.height * scale
+            c.drawBitmap(bg, null, RectF((w - bw) / 2f, (h - bh) / 2f, (w + bw) / 2f, (h + bh) / 2f),
+                Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG))
+            // A touch darker, so the clock and the box stand out.
+            c.drawColor(0x40000000)
         }
 
-        // The cover's colours on the dot grid, one sample per dot.
-        val grid = Bitmap.createBitmap(src, square.left, square.top, s, s).let {
-            Bitmap.createScaledBitmap(it, COLS, COLS, true)
+        // The box: the whole cover as it is (never cropped), as big as fits.
+        val scale = min(w * 0.82f / src.width, h * 0.46f / src.height)
+        val bw = src.width * scale
+        val bh = src.height * scale
+        val cy = h * when (position) {
+            HIGH -> 0.40f
+            LOW -> 0.57f
+            else -> 0.48f
         }
-        val px = IntArray(COLS * COLS)
-        grid.getPixels(px, 0, COLS, 0, 0, COLS, COLS)
+        val box = RectF((w - bw) / 2f, cy - bh / 2f, (w + bw) / 2f, cy + bh / 2f)
+        val radius = min(bw, bh) * 0.035f
 
-        // The melt: the picture fades out while its dots fade in, then the dots shrink and grey out
-        // into the plain grid.
-        val fadeFrom = side * 0.55f
-        val shrinkFrom = side * 0.9f
-        val shrinkTo = side + h * 0.36f
-
-        if (style == COVER) {
-            val fade = Paint().apply {
-                shader = LinearGradient(0f, fadeFrom, 0f, side, 0x00000000, Color.BLACK, Shader.TileMode.CLAMP)
-            }
-            c.drawRect(0f, fadeFrom, side, side + 1f, fade)
+        val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.BLACK
+            setShadowLayer(w * 0.05f, 0f, w * 0.02f, 0x80000000.toInt())
         }
-
-        val dot = Paint(Paint.ANTI_ALIAS_FLAG)
-        val rows = ceil(h / pitch).toInt()
-        for (r in 0 until rows) {
-            val y = pitch * (r + 0.5f)
-            if (style == COVER && y < fadeFrom) continue
-            val alpha = if (style == COVER) ((y - fadeFrom) / (shrinkFrom - fadeFrom)).coerceIn(0f, 1f) else 1f
-            val k = ((y - shrinkFrom) / (shrinkTo - shrinkFrom)).coerceIn(0f, 1f)
-            // Smooth shrink: full-size dots at the start of the melt, the tiny grid at the end.
-            val grow = 1f - k * k * (3f - 2f * k)
-            // Below the cover, the last row of it carries on downwards.
-            val sy = min(COLS - 1, (y / side * COLS).toInt())
-            for (col in 0 until COLS) {
-                val x = pitch * (col + 0.5f)
-                val sample = px[sy * COLS + col]
-                val lum = (0.2126f * Color.red(sample) + 0.7152f * Color.green(sample) + 0.0722f * Color.blue(sample)) / 255f
-                val base = if (mono) grey(lum) else brighten(sample)
-                val full = pitch * 0.5f * (0.5f + 0.45f * lum)
-                val tiny = pitch * 0.09f
-                dot.color = blend(base, Look.DOT_OFF, k)
-                dot.alpha = (255 * alpha).toInt()
-                c.drawCircle(x, y, tiny + (full - tiny) * grow, dot)
+        c.drawRoundRect(box, radius, radius, shadow)
+        val cover = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+            shader = BitmapShader(src, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
+                setLocalMatrix(Matrix().apply {
+                    setScale(scale, scale)
+                    postTranslate(box.left, box.top)
+                })
             }
         }
-
-        // A little shade under the status bar and clock so they read on bright covers.
-        val shade = Paint().apply {
-            shader = LinearGradient(0f, 0f, 0f, h * 0.24f, 0x59000000, 0x00000000, Shader.TileMode.CLAMP)
-        }
-        c.drawRect(0f, 0f, w.toFloat(), h * 0.24f, shade)
+        c.drawRoundRect(box, radius, radius, cover)
         return out
     }
 
-    private fun grey(lum: Float): Int {
-        val v = (40 + 215 * lum).toInt().coerceIn(0, 255)
-        return Color.rgb(v, v, v)
+    /**
+     * A very soft blur of the cover for the background: blurred small, enlarged, then blurred again
+     * so no blockiness shows once it's stretched over the whole screen.
+     */
+    private fun blurred(src: Bitmap): Bitmap {
+        val s = min(src.width, src.height)
+        val square = Bitmap.createBitmap(src, (src.width - s) / 2, (src.height - s) / 2, s, s)
+        val small = boxBlur(Bitmap.createScaledBitmap(square, 40, 40, true), radius = 3, passes = 3)
+        return boxBlur(Bitmap.createScaledBitmap(small, 160, 160, true), radius = 6, passes = 2)
     }
 
-    /** Dots are small, so lift them a little to keep the colour. */
-    private fun brighten(c: Int): Int {
-        val hsv = FloatArray(3)
-        Color.colorToHSV(c, hsv)
-        hsv[2] = (hsv[2] * 1.15f + 0.06f).coerceAtMost(1f)
-        return Color.HSVToColor(hsv)
+    private fun boxBlur(bmp: Bitmap, radius: Int, passes: Int): Bitmap {
+        val w = bmp.width
+        val h = bmp.height
+        val px = IntArray(w * h)
+        bmp.getPixels(px, 0, w, 0, 0, w, h)
+        repeat(passes) {
+            blurLines(px, w, h, radius, horizontal = true)
+            blurLines(px, w, h, radius, horizontal = false)
+        }
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        out.setPixels(px, 0, w, 0, 0, w, h)
+        return out
     }
 
-    private fun blend(a: Int, b: Int, t: Float): Int = Color.rgb(
-        (Color.red(a) + (Color.red(b) - Color.red(a)) * t).toInt(),
-        (Color.green(a) + (Color.green(b) - Color.green(a)) * t).toInt(),
-        (Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t).toInt(),
-    )
+    private fun blurLines(px: IntArray, w: Int, h: Int, radius: Int, horizontal: Boolean) {
+        val lines = if (horizontal) h else w
+        val len = if (horizontal) w else h
+        val line = IntArray(len)
+        for (l in 0 until lines) {
+            for (i in 0 until len) line[i] = px[if (horizontal) l * w + i else i * w + l]
+            for (i in 0 until len) {
+                var r = 0
+                var g = 0
+                var b = 0
+                var n = 0
+                for (k in max(0, i - radius)..min(len - 1, i + radius)) {
+                    val v = line[k]
+                    r += (v shr 16) and 0xFF; g += (v shr 8) and 0xFF; b += v and 0xFF; n++
+                }
+                px[if (horizontal) l * w + i else i * w + l] =
+                    (0xFF shl 24) or ((r / n) shl 16) or ((g / n) shl 8) or (b / n)
+            }
+        }
+    }
 }

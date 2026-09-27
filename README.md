@@ -1,24 +1,22 @@
 # Walllock
 
-The iPhone's full-screen album cover for the Android lock screen, with a Nothing twist. While music
-plays, your lock screen wallpaper becomes the album cover. Your phone's own clock, notifications and
-media player stay exactly where they are, on top of it. When the music stops, your wallpaper comes
-back.
+The iPhone's big album cover, on the Android lock screen. While music plays, your lock screen shows
+the album cover as a large rounded box, over a soft blur of its own colours. Your phone's own clock,
+notifications and media player stay exactly where they are, on top of it. When the music stops,
+your wallpaper comes back.
 
 ## What it does
 
-- **Cover wallpaper.** The album cover fills the top of the lock screen, as wide as the screen, like
-  the iPhone.
-- **Melts into dots.** The bottom of the cover breaks up into dots of its own colours, which shrink
-  and grey out into a faint Nothing dot grid behind your notifications.
-- **Dots style.** Or the whole cover as a colour dot-matrix.
-- **Black and white.** A monochrome version, the Nothing way.
+- **Big cover.** The whole cover, exactly as it is (never cropped or changed), as a big rounded box
+  with a soft shadow, like the iPhone.
+- **Background.** A blur of the cover's colours, or plain black.
+- **Position.** High, middle or low, to sit clear of your phone's clock and notifications.
 - **Follows the music.** Changes with every song, waits a moment while you skip through, and keeps
   the cover for 10 minutes after you pause (can be turned off).
 - **Puts your wallpaper back.** When music stops, the lock screen goes back to your home screen
   wallpaper, or to an image you pick (for lock screens that had their own wallpaper).
 - **Quick Settings tile** to switch it on and off, even from the lock screen.
-- **Live preview** in the app.
+- **Live preview** in the app, which is styled in the Nothing look.
 
 Walllock only changes the lock screen wallpaper; it never draws over the lock screen or the home
 screen.

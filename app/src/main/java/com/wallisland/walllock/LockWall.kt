@@ -47,26 +47,26 @@ object LockWall {
         val grace = if (prefs.showPaused) PAUSED_GRACE_MS else 0L
         val want = prefs.enabled && t != null && art != null && (t.playing || sincePlaying < grace)
         if (want) {
-            val key = "${t!!.artKey}|${prefs.style}|${prefs.mono}"
+            val key = "${t!!.artKey}|${prefs.blackBackground}|${prefs.position}"
             if (!t.playing) {
                 // Look again once the pause has gone on long enough.
                 main.postDelayed(evaluate, grace - sincePlaying + 1000)
             }
             if (key == appliedKey && prefs.coverActive) return
             appliedKey = key
-            val style = prefs.style
-            val mono = prefs.mono
-            worker.execute { apply(ctx, art!!, style, mono) }
+            val black = prefs.blackBackground
+            val position = prefs.position
+            worker.execute { apply(ctx, art!!, black, position) }
         } else if (prefs.coverActive || appliedKey != null) {
             appliedKey = null
             worker.execute { restore(ctx) }
         }
     }
 
-    private fun apply(ctx: Context, art: Bitmap, style: Int, mono: Boolean) {
+    private fun apply(ctx: Context, art: Bitmap, black: Boolean, position: Int) {
         try {
             val (w, h) = screenSize(ctx)
-            val bmp = CoverArt.compose(art, w, h, style, mono)
+            val bmp = CoverArt.compose(art, w, h, black, position)
             WallpaperManager.getInstance(ctx).setBitmap(bmp, null, false, WallpaperManager.FLAG_LOCK)
             Prefs(ctx).coverActive = true
         } catch (_: Exception) {

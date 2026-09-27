@@ -15,15 +15,15 @@ class Prefs(ctx: Context) {
         get() = sp.getBoolean("show_paused", true)
         set(v) = sp.edit().putBoolean("show_paused", v).apply()
 
-    /** [CoverArt.COVER] (the picture melting into dots) or [CoverArt.DOTS] (all dots). */
-    var style: Int
-        get() = sp.getInt("style", CoverArt.COVER)
-        set(v) = sp.edit().putInt("style", v).apply()
+    /** Plain black behind the cover instead of a blur of its colours. */
+    var blackBackground: Boolean
+        get() = sp.getBoolean("black_background", false)
+        set(v) = sp.edit().putBoolean("black_background", v).apply()
 
-    /** Black and white, the Nothing way. */
-    var mono: Boolean
-        get() = sp.getBoolean("mono", false)
-        set(v) = sp.edit().putBoolean("mono", v).apply()
+    /** How high the cover sits: [CoverArt.HIGH], [CoverArt.MIDDLE] or [CoverArt.LOW]. */
+    var position: Int
+        get() = sp.getInt("position", CoverArt.MIDDLE)
+        set(v) = sp.edit().putInt("position", v).apply()
 
     /** Whether the lock screen currently shows our cover, so it can be put back even after a restart. */
     var coverActive: Boolean

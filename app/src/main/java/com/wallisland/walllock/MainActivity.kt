@@ -122,7 +122,7 @@ class MainActivity : Activity() {
             includeFontPadding = false
         })
         col.addView(TextView(this).apply {
-            text = "While music plays, your lock screen wallpaper becomes the album cover. " +
+            text = "While music plays, your lock screen shows the album cover big, like the iPhone. " +
                 "Your clock, notifications and player stay on top."
             typeface = Look.mono(context)
             textSize = 13f
@@ -177,34 +177,41 @@ class MainActivity : Activity() {
     private fun buildLook(col: LinearLayout) {
         col.addView(sectionLabel("LOOK"))
         val card = card()
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        card.addView(choiceRow("Background", "Behind the cover.", listOf("Blur", "Black"),
+            { if (prefs.blackBackground) 1 else 0 }) { prefs.blackBackground = it == 1 })
+        card.addView(divider())
+        card.addView(choiceRow("Position", "Clear of your clock and notifications.", listOf("High", "Mid", "Low"),
+            { prefs.position }) { prefs.position = it })
+        col.addView(card)
+    }
+
+    /** A title and a row of pick-one pills under it. */
+    private fun choiceRow(title: String, sub: String, labels: List<String>, current: () -> Int, pick: (Int) -> Unit): View {
+        val wrap = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(16), dp(16), dp(16))
         }
-        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, dp(12), 0) }
-        texts.addView(titleView("Style"))
-        texts.addView(subView("Cover melts into dots, or all dots."))
-        row.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        val cover = choicePill("Cover")
-        val dots = choicePill("Dots")
-        fun paint() {
-            styleChoice(cover, prefs.style == CoverArt.COVER)
-            styleChoice(dots, prefs.style == CoverArt.DOTS)
+        wrap.addView(titleView(title))
+        wrap.addView(subView(sub))
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(12), 0, 0)
         }
-        cover.setOnClickListener { prefs.style = CoverArt.COVER; paint(); changed() }
-        dots.setOnClickListener { prefs.style = CoverArt.DOTS; paint(); changed() }
+        val pills = labels.map { choicePill(it) }
+        fun paint() = pills.forEachIndexed { i, v -> styleChoice(v, i == current()) }
+        pills.forEachIndexed { i, v ->
+            v.setOnClickListener {
+                pick(i)
+                paint()
+                changed()
+            }
+            row.addView(v, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                if (i > 0) marginStart = dp(8)
+            })
+        }
         paint()
-        row.addView(cover)
-        row.addView(dots, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            .apply { marginStart = dp(8) })
-        card.addView(row)
-        card.addView(divider())
-        card.addView(toggleRow("Black and white", "Monochrome cover and dots.", prefs.mono) {
-            prefs.mono = it
-            changed()
-        })
-        col.addView(card)
+        wrap.addView(row)
+        return wrap
     }
 
     private fun buildBehaviour(col: LinearLayout) {
@@ -289,7 +296,7 @@ class MainActivity : Activity() {
             previewNote.visibility = View.VISIBLE
             return
         }
-        val key = "${t.artKey}|${prefs.style}|${prefs.mono}"
+        val key = "${t.artKey}|${prefs.blackBackground}|${prefs.position}"
         if (key == previewKey) return
         previewKey = key
         previewNote.visibility = View.GONE
@@ -298,10 +305,10 @@ class MainActivity : Activity() {
         // A third of full size is plenty for the preview and quick to draw.
         val w = sw / 3
         val h = sh / 3
-        val style = prefs.style
-        val mono = prefs.mono
+        val black = prefs.blackBackground
+        val position = prefs.position
         Thread {
-            val bmp = runCatching { CoverArt.compose(art, w, h, style, mono) }.getOrNull()
+            val bmp = runCatching { CoverArt.compose(art, w, h, black, position) }.getOrNull()
             runOnUiThread { if (gen == previewGen && !isFinishing) preview.setImageBitmap(bmp) }
         }.start()
     }
